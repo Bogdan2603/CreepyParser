@@ -1,31 +1,93 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* Forțăm fundalul negru aici, ca să nu mai fie alb niciodată */
-body {
-  background-color: #050505; 
-  color: #e0e0e0;
-  font-family: 'Courier New', Courier, monospace; /* Aspect de document secret */
+:root {
+  /* Light Mode Defaults */
+  --neon-red: #990000; /* Darker blood red for visibility on white */
+  --dark-red: #ffcccc;
+  --bg-color: #f3f4f6;
 }
 
-/* Efect de scanlines (linii de monitor vechi) */
-body::before {
+.dark {
+  /* Dark Mode (Horror Theme) */
+  --neon-red: #ff3333;
+  --dark-red: #3a0000;
+  --bg-color: #050505;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--neon-red);
+  font-family: 'Courier New', Courier, monospace; /* Font stil mașină de scris/cod */
+  overflow-x: hidden;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* --- EFECTE CRT (MONITOR VECHI) --- */
+
+/* Linii de scanare (Scanlines) - Dark Mode Only */
+.dark body::before {
   content: " ";
   display: block;
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   bottom: 0;
   right: 0;
-  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-  z-index: 2;
-  background-size: 100% 2px, 3px 100%;
+  background: linear-gradient(
+    to bottom,
+    rgba(18, 16, 16, 0) 50%,
+    rgba(0, 0, 0, 0.25) 50%
+  );
+  background-size: 100% 4px;
+  z-index: 50;
   pointer-events: none;
 }
 
-/* Efect de vignetă (colțuri negre) */
-main {
-  position: relative;
-  z-index: 10;
-  box-shadow: inset 0 0 150px rgba(0,0,0,0.9);
-  min-height: 100vh;
+/* Vignette (Umbră pe margini) - Dark Mode Only */
+.dark body::after {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: radial-gradient(circle, rgba(0,0,0,0) 60%, rgba(0,0,0,0.8) 100%);
+  z-index: 51;
+  pointer-events: none;
+}
+
+/* Text care pâlpâie (Glitch Effect) */
+@keyframes flicker {
+  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
+    text-shadow: 0 0 5px var(--neon-red), 0 0 10px var(--neon-red);
+    opacity: 1;
+  }
+  20%, 24%, 55% {
+    text-shadow: none;
+    opacity: 0.5;
+  }
+}
+
+.animate-flicker {
+  animation: flicker 4s infinite;
+}
+
+/* Cursor personalizat */
+input, textarea {
+  caret-color: var(--neon-red);
+}
+
+/* Scrollbar Roșu */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #111;
+}
+::-webkit-scrollbar-thumb {
+  background: #800;
+  border: 1px solid var(--neon-red);
 }

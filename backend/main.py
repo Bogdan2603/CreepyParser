@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from regex_engine import CreepyRegexEngine
 import requests
-from bs4 import BeautifulSoup # Importăm "curățătorul" de HTML
+import datetime
 
 app = FastAPI(title="CreepyParser API")
 
@@ -14,67 +14,95 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Modelul acceptă acum text SAU url (opționale ambele, dar unul e obligatoriu logic)
 class StoryInput(BaseModel):
-    text: str | None = None
-    url: str | None = None
+    url: str
 
 engine = CreepyRegexEngine()
 
-def scrape_url(url: str):
-    """
-    Descarcă pagina și extrage textul.
-    Are logică specifică pentru Reddit pentru a evita comentariile.
-    """
+def scrape_reddit_enhanced(url: str):
+    clean_url = url.split('?')[0].rstrip('/')
+    if not clean_url.endswith('.json'):
+        json_url = f"{clean_url}.json"
+    else:
+        json_url = clean_url
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CreepyParser/5.0'}
+
     try:
-        # Ne prefacem că suntem un browser real, altfel Reddit ne blochează
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        response = requests.get(json_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            raise Exception(f"Reddit API Error: {response.status_code}")
+
+        data = response.json()
         
-        # Parsăm HTML-ul
-        soup = BeautifulSoup(response.content, 'html.parser')
+        # Robustness check
+        if not isinstance(data, list) or not data:
+             raise Exception("Invalid Reddit API Response (Not a list)")
+             
+        children = data[0].get('data', {}).get('children', [])
+        if not children:
+             raise Exception("No post data found (children empty)")
+             
+        post_data = children[0]['data']
+
+        # Extragere date
+        title = post_data.get('title', 'Unknown Title')
+        author = post_data.get('author', 'Unknown')
+        selftext = post_data.get('selftext', '')
         
-        # --- STRATEGIE SPECIFICĂ REDDIT ---
-        # Reddit modern folosește <shreddit-post> și pune textul în slot="text-body"
-        shreddit_post = soup.find('shreddit-post')
-        if shreddit_post:
-            content_slot = shreddit_post.find('div', slot="text-body")
-            if content_slot:
-                paragraphs = content_slot.find_all('p')
-                return "\n\n".join([p.get_text() for p in paragraphs])
+        # Fallback for empty text (e.g. image posts or links)
+        if not selftext:
+            url_content = post_data.get('url', '')
+            if url_content:
+                selftext = f"[NO TEXT DETECTED - LINK ONLY]\nURL: {url_content}"
+            else:
+                selftext = "[NO CONTENT]"
         
-        # --- STRATEGIE GENERICĂ (FALLBACK) ---
-        # Extragem textul din toate tag-urile <p> (paragrafe)
-        # Aceasta este o strategie generică bună pentru Wiki-uri
-        paragraphs = soup.find_all('p')
-        text_content = "\n\n".join([p.get_text() for p in paragraphs])
+        flair = post_data.get('link_flair_text', '')
+        subreddit = post_data.get('subreddit_name_prefixed', 'r/Unknown') # <--- Luăm Subreddit-ul
         
-        return text_content
+        # Conversie Data
+        created_utc = post_data.get('created_utc', 0)
+        if created_utc:
+            dt_object = datetime.datetime.fromtimestamp(created_utc)
+            formatted_date = dt_object.strftime("%d/%m/%Y")
+        else:
+            formatted_date = "Unknown Date"
+
+        # Injectare Header pentru Regex
+        injected_header = f"""
+        FILE_HEADER_START
+        Title: {title}
+        Written by: u/{author}
+        Posted on: {formatted_date}
+        Subreddit: {subreddit}
+        Source: Reddit API
+        """
+        
+        if flair:
+            injected_header += f"\nTW: {flair}"
+            
+        injected_header += "\nFILE_HEADER_END\n\n"
+
+        return injected_header + selftext
+
     except Exception as e:
-        raise Exception(f"Failed to scrape URL: {str(e)}")
+        raise Exception(f"Extraction Failed: {str(e)}")
 
 @app.post("/analyze")
 async def analyze_story(story: StoryInput):
-    content_to_analyze = ""
+    if "reddit.com" not in story.url:
+        raise HTTPException(status_code=400, detail="INVALID TARGET. System accepts only Reddit frequencies.")
 
-    # Logica de decizie: URL sau Text?
-    if story.url:
-        try:
-            content_to_analyze = scrape_url(story.url)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    elif story.text:
-        content_to_analyze = story.text
-    else:
-        raise HTTPException(status_code=400, detail="Please provide either 'text' or 'url'.")
-
-    # Trimitem textul obținut la motorul tău de Regex
-    data = engine.analyze_text(content_to_analyze)
-    
-    # Returnăm și textul extras (ca preview) + datele
-    return {
-        "status": "success", 
-        "extracted_text_preview": content_to_analyze[:200] + "...", 
-        "data": data
-    }
+    try:
+        content_to_analyze = scrape_reddit_enhanced(story.url)
+        data = engine.analyze_text(content_to_analyze)
+        
+        return {
+            "status": "success", 
+            "full_story": content_to_analyze, # <--- Returnăm TOATĂ povestea
+            "data": data
+        }
+    except Exception as e:
+        print(f"Server Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

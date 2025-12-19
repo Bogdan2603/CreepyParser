@@ -2,94 +2,107 @@ import re
 
 class CreepyRegexEngine:
     def analyze_text(self, text: str):
-        """
-        Funcția principală care apelează toate regex-urile.
-        Primește textul brut și returnează un dicționar cu rezultate.
-        """
-        # Dacă textul e gol, returnăm structura goală pentru a evita erori
         if not text:
-            return {}
+            return self._empty_result()
 
-        results = {
-            "authors": self._extract_authors(text),         # Regex 1
-            "trigger_warnings": self._extract_warnings(text), # Regex 2
-            "emails": self._extract_emails(text),           # Regex 3 (Lab 3)
-            "dates": self._extract_dates(text),             # Regex 4
-            "dialogue_stats": self._analyze_dialogue(text), # Regex 5 (Analiză)
-            "spoilers": self._extract_spoilers(text),       # Regex 6 (Edge Case)
-            "zalgo_glitch": self._detect_zalgo(text)        # Regex 7 (Bonus)
+        return {
+            "authors": self._extract_authors(text),
+            "subreddit": self._extract_subreddit(text),
+            "trigger_warnings": self._extract_warnings(text),
+            "emails": self._extract_emails(text),
+            "dates": self._extract_dates(text),
+            "dialogue_stats": self._analyze_dialogue(text),
+            "spoilers": self._extract_spoilers(text),
+            "zalgo_glitch": self._detect_zalgo(text),
+            "entities": self._extract_entities(text), # <-- NOU
+            "creepiness_score": self._calculate_creepiness(text) # <-- NOU
         }
-        return results
+
+    def _empty_result(self):
+        return {
+            "authors": [], "subreddit": "Unknown", "trigger_warnings": [], 
+            "emails": [], "dates": [], 
+            "dialogue_stats": {"dialogue_count": 0, "percentage": 0.0},
+            "spoilers": [], "zalgo_glitch": False,
+            "entities": [], "creepiness_score": 0.0
+        }
 
     def _extract_authors(self, text):
-        # Caută pattern-uri de tip 'u/nume' (Reddit) sau 'Written by: Nume'
-        # EXPLICATIE REGEX: (?:u\/|Written by:?\s*)([\w\-\.]+)
-        # (?:...) -> Grup non-capturing (nu ne interesează textul "Written by", doar ce urmează)
-        # u\/     -> Caută literal caracterele "u/"
-        # |       -> SAU
-        # Written by:? -> Caută "Written by" opțional urmat de ":"
-        # \s* -> Zero sau mai multe spații
-        # ([\w\-\.]+) -> Grupul de captură (ce extragem efectiv). 
-        #                \w (litere/cifre), \- (cratimă), \. (punct). + înseamnă "unul sau mai multe".
-        pattern = r'(?:u\/|Written by:?\s*)([\w\-\.]+)'
-        return list(set(re.findall(pattern, text, re.IGNORECASE)))
+        pattern = r'(?i)(?:Written by:?\s*(?:u\/)?|u\/)([\w\-\.]+)'
+        return list(set(re.findall(pattern, text)))
+
+    def _extract_subreddit(self, text):
+        # Regex pentru a găsi sursa: "Subreddit: r/nume"
+        pattern = r'(?i)(?:Subreddit:?\s*)(r\/[\w]+)'
+        match = re.search(pattern, text)
+        return match.group(1) if match else "Unknown Frequency"
 
     def _extract_warnings(self, text):
-        # Identifică linii de avertizare (TW/CW)
-        # EXPLICATIE REGEX: (?i)(?:TW|CW|Trigger Warning)[\s:]+([^\n]+)
-        # (?i)    -> Case-insensitive (găsește și "tw", și "TW")
-        # [\s:]+  -> Separator: spații sau două puncte
-        # ([^\n]+)-> Capturăm orice caracter CARE NU ESTE "linie nouă" (\n).
-        #            Adică luăm tot textul de pe acea linie.
         pattern = r'(?i)(?:TW|CW|Trigger Warning)[\s:]+([^\n]+)'
         return re.findall(pattern, text)
 
-    def _extract_emails(self, text):
-        # Pattern standard pentru email-uri, util pentru requirements Lab 3
-        # EXPLICATIE: [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
-        # Partea locală @ Domeniu . Extensia (minim 2 litere)
-        pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-        return list(set(re.findall(pattern, text)))
-
     def _extract_dates(self, text):
-        # Extrage date. Este un regex compus din două părți separate de | (SAU)
-        # 1. Format numeric/text: 10/10/2023 sau Oct 31st
-        # 2. Format relativ: "2 hours ago"
         pattern = r'(?:\d{1,2}[-/th|st|nd|rd\s]*\w+[-/,\s]*\d{2,4})|(?:\d+\s+(?:hours?|minutes?|days?|years?)\s+ago)'
         return re.findall(pattern, text, re.IGNORECASE)
 
+    def _extract_emails(self, text):
+        pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        return list(set(re.findall(pattern, text)))
+
+    def _analyze_dialogue(self, text):
+        pattern = r'"([^"]*)"|“([^”]*)”'
+        matches = re.findall(pattern, text)
+        dialogue_content = [m[0] or m[1] for m in matches if m[0] or m[1]]
+        dialogue_len = sum(len(d) for d in dialogue_content)
+        total_len = len(text) if len(text) > 0 else 1
+        return {
+            "dialogue_count": len(dialogue_content),
+            "percentage": round((dialogue_len / total_len) * 100, 2)
+        }
+
     def _extract_spoilers(self, text):
-        # Edge Case: Extrage text ascuns în tag-uri Reddit >! spoiler !<
-        # EXPLICATIE: >!(.*?)!<
-        # .*? -> Punctul înseamnă orice caracter. 
-        #        Steluța * înseamnă "oricâte". 
-        #        Semnul întrebării ? face căutarea "Non-Greedy" (leneșă).
-        #        Fără ?, regex-ul ar înghiți tot textul dintre primul >! și ultimul !< din tot fișierul.
         pattern = r'>!(.*?)!<'
         return re.findall(pattern, text)
 
     def _detect_zalgo(self, text):
-        # Bonus Edge Case: Detectează "Zalgo" text (text corupt, horror)
-        # Caută caractere din gama Unicode "Combining Diacritical Marks" (\u0300-\u036F etc.)
-        # {3,} înseamnă că alertăm doar dacă găsim 3 astfel de semne unul după altul.
-        pattern = r'[\u0300-\u036F\u1AB0-\u1AFF\u1DC0-\u1DFF]{3,}'
-        matches = re.findall(pattern, text)
-        return len(matches) > 0 # Returnează True dacă găsește glitch-uri
+        pattern = r'[\u0300-\u036F\u1AB0-\u1AFF\u1DC0-\u1DFF]+'
+        return bool(re.search(pattern, text))
 
-    def _analyze_dialogue(self, text):
-        # Regex pentru text între ghilimele: "text" sau “text” (smart quotes)
-        pattern = r'"([^"]*)"|“([^”]*)”'
-        matches = re.findall(pattern, text)
+    def _extract_entities(self, text):
+        # Simplistic Entity Extraction: Capitalized words inside sentences
+        # Exclude common sentence starters via lookbehind or simple logic
+        # We look for Capitalized words that are NOT at the start of a line/sentence
+        pattern = r'(?<!^)(?<!\.\s)(?<!\?\s)(?<!\!\s)\b[A-Z][a-z]+\b'
+        candidates = re.findall(pattern, text)
         
-        # findall returnează o listă de tupluri [('text', ''), ('', 'text2')] din cauza celor 2 grupuri.
-        # Trebuie să "aplatizăm" lista.
-        dialogue_content = [m[0] or m[1] for m in matches if m[0] or m[1]]
+        # Filtrăm cuvinte comune (hardcoded stoplist minimal)
+        stopwords = {"The", "A", "An", "And", "But", "Or", "If", "When", "Then", "He", "She", "It", "They", "We", "You", "I", "Me", "My", "His", "Her", "Their", "Our", "Your", "This", "That", "These", "Those"}
+        entities = [word for word in candidates if word not in stopwords and len(word) > 2]
         
-        # Calcule statistice
-        dialogue_len = sum(len(d) for d in dialogue_content)
-        total_len = len(text) if len(text) > 0 else 1
+        # Returnăm top 5 cele mai frecvente
+        from collections import Counter
+        return [item[0] for item in Counter(entities).most_common(5)]
+
+    def _calculate_creepiness(self, text):
+        creepy_words = [
+            "blood", "death", "dead", "die", "kill", "murder", "scream", "shout", "whisper",
+            "shadow", "dark", "darkness", "night", "black", "dim", "gloom",
+            "ghost", "spirit", "demon", "monster", "beast", "creature", "entity",
+            "fear", "scared", "afraid", "terrified", "terror", "horror", "panic",
+            "eye", "watch", "stare", "glance", "look", "saw", "seen",
+            "run", "ran", "fled", "escape", "hide", "hiding", "chase",
+            "strange", "weird", "odd", "unsettling", "creepy", "eerie", "unnatural",
+            "pain", "hurt", "ache", "agony", "suffering", "torture",
+            "bone", "flesh", "skin", "body", "corpse", "remains", "skeleton"
+        ]
         
-        return {
-            "dialogue_count": len(dialogue_content),
-            "percentage": round((dialogue_len / total_len) * 100, 2) # Formatare cu 2 zecimale
-        }
+        text_lower = text.lower()
+        word_count = len(re.findall(r'\w+', text))
+        if word_count == 0:
+            return 0.0
+            
+        creepy_hits = sum(1 for word in creepy_words if word in text_lower)
+        
+        # Scorul este relativ la lungimea textului, normalizat arbitrar
+        score = (creepy_hits / word_count) * 100 * 5  # Factor de multiplicare 5 pentru vizibilitate
+        return round(min(score, 100), 2)  # Cap la 100
